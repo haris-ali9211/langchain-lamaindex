@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -12,13 +13,14 @@ from langchain_core.prompts import PromptTemplate
 from langchain_community.chat_models import ChatOllama
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
+import nest_asyncio
 import uvicorn
 
 # Load environment variables
 load_dotenv()
 
 # Load PDF documents
-pdf_file_paths = ["./data/Medical Policy FY 23-24.pdf", "./data/Provident fund policy.pdf"]
+pdf_file_paths = ["../data/Medical Policy FY 23-24.pdf", "../data/Provident fund policy.pdf"]
 
 docs_list = []
 for pdf_path in pdf_file_paths:
@@ -68,9 +70,6 @@ no_context_prompt = PromptTemplate(
     input_variables=["question"],
 )
 
-local_llm = 'llama3'
-llm = ChatOllama(model=local_llm, temperature=0)
-
 # Load a pre-trained model for semantic similarity
 model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
 
@@ -115,7 +114,7 @@ def is_useful_for_future(question):
     return result[0]['label'] == 'IMPORTANT'
 
 # Function to get the appropriate chain based on relevance
-def get_chain(question, context_docs):
+def get_chain(question, context_docs, llm):
     if is_relevant(question, context_docs):
         print("Relevant")
         return context_prompt | llm | StrOutputParser()
@@ -124,21 +123,19 @@ def get_chain(question, context_docs):
         return no_context_prompt | llm | StrOutputParser()
 
 # Main function to run the question-answering process
-def answer_question(question):
+def answer_question(question, llm_model):
+    llm = ChatOllama(model=llm_model, temperature=0)
     docs = retriever.invoke(question)
-    rag_chain = get_chain(question, docs)
+    rag_chain = get_chain(question, docs, llm)
     if is_relevant(question, docs):
         generation = rag_chain.invoke({"context": docs, "question": question})
     else:
         generation = rag_chain.invoke({"question": question})
 
     # Check if the question is useful for the future
-    if is_useful_for_future(question):
-        print(f"This question/statement is useful for the future.")
-    else:
-        print(f"This question/statement is not particularly useful for the future.")
+    important = is_useful_for_future(question)
 
-    return generation
+    return generation, important
 
 # FastAPI app
 app = FastAPI()
@@ -146,18 +143,24 @@ app = FastAPI()
 # Request model
 class QuestionRequest(BaseModel):
     question: str
+    llm: str
 
 # Response model
 class AnswerResponse(BaseModel):
     answer: str
+    responseTime: str
+    important: bool
 
 @app.post("/ask", response_model=AnswerResponse)
 async def ask_question(request: QuestionRequest):
+    start_time = time.time()  # Start timing
     try:
-        answer = answer_question(request.question)
-        return AnswerResponse(answer=answer)
+        answer, important = answer_question(request.question, request.llm)
+        response_time = "{:.2f} sec".format(time.time() - start_time)
+        return AnswerResponse(answer=answer, responseTime=response_time, important=important)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# Start the FastAPI server within the notebook
+nest_asyncio.apply()
+uvicorn.run(app, host="127.0.0.1", port=8000)

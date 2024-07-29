@@ -14,9 +14,19 @@ from langchain_core.messages import HumanMessage
 from docx import Document as DocxDocument
 import time
 from typing import List, Any
-
+from pymongo import MongoClient
+from dotenv import load_dotenv
 
 app = FastAPI()
+
+# Load environment variables from .env file
+load_dotenv()
+
+# MongoDB connection
+mongodb_uri = os.getenv("MONGODB_URI")
+client = MongoClient(mongodb_uri)
+db = client.get_database("chat_db")
+chat_collection = db.get_collection("chat_history")
 
 # Initialize model and components
 local_llm = 'llama3'
@@ -25,6 +35,24 @@ policy_directory = "../data/policy"
 directories = [cascade_directory, policy_directory]
 pdf_file_paths = []
 docx_file_paths = []
+
+
+# MongoDB connection
+mongodb_uri = os.getenv("MONGODB_URI")
+if not mongodb_uri:
+    raise ValueError("No MONGODB_URI found in environment variables")
+
+try:
+    client = MongoClient(mongodb_uri)
+    db = client.get_database("chat_db")
+    chat_collection = db.get_collection("chat_history")
+    # Test the connection
+    client.admin.command('ping')
+    print("MongoDB connection established successfully.")
+except ConnectionError as e:
+    print(f"MongoDB connection error: {e}")
+    raise HTTPException(status_code=500, detail=str(e))
+
 
 for directory in directories:
     for filename in os.listdir(directory):
@@ -111,7 +139,7 @@ class QueryModel(BaseModel):
 class AnswerResponse(BaseModel):
     answer: str
     responseTime: str
-    # context: List[Any]
+
 @app.post("/ask")
 async def ask_question(query: QueryModel):
     start_time = time.time()
@@ -119,18 +147,41 @@ async def ask_question(query: QueryModel):
         question = query.question
         response = rag_chain.invoke({"input": question, "chat_history": chat_history})
         response_time = "{:.2f} sec".format(time.time() - start_time)
-        chat_history.extend([HumanMessage(content=question), response["answer"]])
 
-        # if "context" in response:
-        #     context = response["context"]
-        # else:
-        #     context = []
+        # Convert HumanMessage to dict for storage
+        human_message_dict = {"type": "human", "content": question}
+        assistant_message_dict = {"type": "assistant", "content": response["answer"]}
 
         chat_history.extend([HumanMessage(content=question), response["answer"]])
+
+
+        # Save chat history to MongoDB
+        chat_document = {
+            "messages": [human_message_dict, assistant_message_dict],
+            "user": "haris-ali",
+            "prompt":"adda131dad1",
+            "timestamp": time.time()
+        }
+        chat_collection.insert_one(chat_document)
+
         return AnswerResponse(answer=response["answer"], responseTime=response_time)
 
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=str(e))
+
+# Example function to retrieve chat history from MongoDB
+@app.get("/chat_history")
+async def get_chat_history():
+    history_docs = chat_collection.find().sort("timestamp", -1)
+    chat_histories = []
+    for doc in history_docs:
+        messages = doc["messages"]
+        chat_histories.append({
+            "messages": messages,
+            "timestamp": doc["timestamp"]
+        })
+    return chat_histories
 
 if __name__ == "__main__":
     import uvicorn

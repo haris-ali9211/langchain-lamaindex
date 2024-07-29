@@ -1,4 +1,7 @@
-llama-index
-openai
-pypdf
+fastapi
 python-dotenv
+uvicorn
+langchain
+sentence-transformers
+transformers
+nest_asyncio

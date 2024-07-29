@@ -20,7 +20,7 @@ import uvicorn
 load_dotenv()
 
 # Load PDF documents
-pdf_file_paths = ["../data/Medical Policy FY 23-24.pdf", "../data/Provident fund policy.pdf"]
+pdf_file_paths = ["../data/policy/Medical Policy FY 23-24.pdf", "../data/policy/Provident fund policy.pdf"]
 
 docs_list = []
 for pdf_path in pdf_file_paths:
@@ -151,9 +151,9 @@ class AnswerResponse(BaseModel):
     responseTime: str
     important: bool
 
-@app.post("/ask", response_model=AnswerResponse)
+@app.post("/v1.0/ask/", response_model=AnswerResponse)
 async def ask_question(request: QuestionRequest):
-    start_time = time.time()  # Start timing
+    start_time = time.time()
     try:
         answer, important = answer_question(request.question, request.llm)
         response_time = "{:.2f} sec".format(time.time() - start_time)

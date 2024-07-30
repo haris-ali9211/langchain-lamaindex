@@ -4,7 +4,7 @@ import os
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.docstore.document import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import GPT4AllEmbeddings
 from langchain_community.chat_models import ChatOllama
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -24,21 +24,6 @@ load_dotenv()
 
 # MongoDB connection
 mongodb_uri = os.getenv("MONGODB_URI")
-client = MongoClient(mongodb_uri)
-db = client.get_database("chat_db")
-chat_collection = db.get_collection("chat_history")
-
-# Initialize model and components
-local_llm = 'llama3.1'
-cascade_directory = "../data/cascade"
-policy_directory = "../data/policy"
-directories = [cascade_directory, policy_directory]
-pdf_file_paths = []
-docx_file_paths = []
-
-
-# MongoDB connection
-mongodb_uri = os.getenv("MONGODB_URI")
 if not mongodb_uri:
     raise ValueError("No MONGODB_URI found in environment variables")
 
@@ -46,13 +31,21 @@ try:
     client = MongoClient(mongodb_uri)
     db = client.get_database("chat_db")
     chat_collection = db.get_collection("chat_history")
-    # Test the connection
     client.admin.command('ping')
     print("MongoDB connection established successfully.")
 except ConnectionError as e:
     print(f"MongoDB connection error: {e}")
     raise HTTPException(status_code=500, detail=str(e))
 
+# Initialize model and components
+local_llm = 'llama3.1'
+cascade_directory = "../data/cascade"
+policy_directory = "../data/policy"
+platform_user_guide_directory = "../data/platform user guide"
+
+directories = [cascade_directory, policy_directory, platform_user_guide_directory]
+pdf_file_paths = []
+docx_file_paths = []
 
 for directory in directories:
     for filename in os.listdir(directory):
@@ -152,21 +145,18 @@ async def ask_question(query: QueryModel):
         response = rag_chain.invoke({"input": question, "chat_history": chat_history})
         response_time = "{:.2f} sec".format(time.time() - start_time)
 
-        # Convert HumanMessage to dict for storage
         human_message_dict = {"type": "human", "content": question}
         assistant_message_dict = {"type": "assistant", "content": response["answer"]}
         context = {"type": "context", "content": json.dumps(response["context"], default=str)}
 
         chat_history.extend([HumanMessage(content=question), response["answer"]])
 
-        # New messages to be appended
         new_messages = [
             human_message_dict,
             assistant_message_dict,
             context
         ]
 
-        # Attempt to update the document
         result = chat_collection.update_one(
             {"identifier": "231"},
             {
@@ -179,7 +169,6 @@ async def ask_question(query: QueryModel):
             }
         )
 
-        # If no document was matched and updated, insert a new document
         if result.matched_count == 0:
             new_document = {
                 "identifier": "231",
@@ -198,8 +187,6 @@ async def ask_question(query: QueryModel):
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=str(e))
-
-# Example function to retrieve chat history from MongoDB
 
 @app.get("/chat_history")
 async def get_chat_history():
@@ -233,6 +220,7 @@ async def get_chat_history():
 @app.get("/clear")
 async def get_chat_history_clear():
     chat_history.clear()
+    return {"message": "Chat history cleared."}
 
 @app.get("/get")
 async def get_chat_history_get():

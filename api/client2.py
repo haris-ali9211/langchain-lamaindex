@@ -13,7 +13,6 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.messages import HumanMessage
 from docx import Document as DocxDocument
 import time
-from typing import List, Any
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -140,6 +139,10 @@ class AnswerResponse(BaseModel):
     answer: str
     responseTime: str
 
+def serialize_document(document):
+    document["_id"] = str(document["_id"])
+    return document
+
 @app.post("/ask")
 async def ask_question(query: QueryModel):
     start_time = time.time()
@@ -154,15 +157,38 @@ async def ask_question(query: QueryModel):
 
         chat_history.extend([HumanMessage(content=question), response["answer"]])
 
+        # New messages to be appended
+        new_messages = [
+            human_message_dict,
+            assistant_message_dict
+        ]
 
-        # Save chat history to MongoDB
-        chat_document = {
-            "messages": [human_message_dict, assistant_message_dict],
-            "user": "haris-ali",
-            "prompt":"adda131dad1",
-            "timestamp": time.time()
-        }
-        chat_collection.insert_one(chat_document)
+        # Attempt to update the document
+        result = chat_collection.update_one(
+            {"identifier": "231"},
+            {
+                "$set": {
+                    "timestamp": time.time()
+                },
+                "$push": {
+                    "messages":  new_messages
+                }
+            }
+        )
+
+        # If no document was matched and updated, insert a new document
+        if result.matched_count == 0:
+            new_document = {
+                "identifier": "231",
+                "messages": [new_messages],
+                "user": "haris-ali",
+                "promptTitle": "Prompt-Title",
+                "timestamp": time.time()
+            }
+            chat_collection.insert_one(new_document)
+            print("Document not found, inserted a new document.")
+        else:
+            print("Document updated successfully!")
 
         return AnswerResponse(answer=response["answer"], responseTime=response_time)
 
@@ -171,17 +197,39 @@ async def ask_question(query: QueryModel):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Example function to retrieve chat history from MongoDB
+
 @app.get("/chat_history")
 async def get_chat_history():
-    history_docs = chat_collection.find().sort("timestamp", -1)
-    chat_histories = []
-    for doc in history_docs:
-        messages = doc["messages"]
-        chat_histories.append({
-            "messages": messages,
-            "timestamp": doc["timestamp"]
-        })
-    return chat_histories
+    try:
+        history_docs = chat_collection.find({"identifier": "231"})
+        history_list = [serialize_document(doc) for doc in history_docs]
+
+        if history_list:
+            messages = history_list[0]["messages"]
+
+            for message_pair in messages:
+                if len(message_pair) == 2:
+                    human_message = message_pair[0]
+                    assistant_message = message_pair[1]
+
+                    if human_message["type"] == "human" and assistant_message["type"] == "assistant":
+                        chat_history.extend([
+                            HumanMessage(content=human_message["content"]),
+                            assistant_message["content"]
+                        ])
+
+        return history_list
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/clear")
+async def get_chat_history_clear():
+    chat_history.clear()
+
+@app.get("/get")
+async def get_chat_history_get():
+    return chat_history
 
 if __name__ == "__main__":
     import uvicorn

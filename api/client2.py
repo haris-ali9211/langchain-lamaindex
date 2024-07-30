@@ -15,6 +15,7 @@ from docx import Document as DocxDocument
 import time
 from pymongo import MongoClient
 from dotenv import load_dotenv
+import json
 
 app = FastAPI()
 
@@ -28,7 +29,7 @@ db = client.get_database("chat_db")
 chat_collection = db.get_collection("chat_history")
 
 # Initialize model and components
-local_llm = 'llama3'
+local_llm = 'llama3.1'
 cascade_directory = "../data/cascade"
 policy_directory = "../data/policy"
 directories = [cascade_directory, policy_directory]
@@ -98,7 +99,7 @@ vectorstore = Chroma.from_documents(
 )
 
 retriever = vectorstore.as_retriever()
-llm = ChatOllama(model=local_llm, temperature=0)
+llm = ChatOllama(model=local_llm, temperature=0, baseUrl="http://localhost:11434/",)
 
 contextualize_q_system_prompt = """Given a chat history and the latest user question \
 which might reference context in the chat history, formulate a standalone question \
@@ -154,13 +155,15 @@ async def ask_question(query: QueryModel):
         # Convert HumanMessage to dict for storage
         human_message_dict = {"type": "human", "content": question}
         assistant_message_dict = {"type": "assistant", "content": response["answer"]}
+        context = {"type": "context", "content": json.dumps(response["context"], default=str)}
 
         chat_history.extend([HumanMessage(content=question), response["answer"]])
 
         # New messages to be appended
         new_messages = [
             human_message_dict,
-            assistant_message_dict
+            assistant_message_dict,
+            context
         ]
 
         # Attempt to update the document
@@ -217,6 +220,10 @@ async def get_chat_history():
                             HumanMessage(content=human_message["content"]),
                             assistant_message["content"]
                         ])
+
+                #     context = json.loads(message["content"])
+                ## Now you can use `context` as a dictionary
+                #        print("Decoded context:", context)
 
         return history_list
     except Exception as e:

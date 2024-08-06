@@ -1,7 +1,9 @@
-fastapi
-python-dotenv
-uvicorn
-langchain
+fastapi~=0.111.1
+python-dotenv~=1.0.1
+uvicorn~=0.30.3
+langchain~=0.2.11
 sentence-transformers
-transformers
+transformers~=4.42.4
 nest_asyncio
+pydantic~=2.8.2
+pymongo~=4.8.0
